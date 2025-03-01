@@ -1,0 +1,881 @@
+import pygame
+import sys
+import random
+import math
+import pyperclip  # For copy save to clipboard
+
+# ---------------------------
+# Global Variables for New Features
+# ---------------------------
+fullscreen = True  # Fullscreen by default
+level_number = 1
+game_log = []  # Log messages for events
+
+# Global difficulty index (0: Beginner, 1: Easy, 2: Medium, 3: Hard, 4: Insane, 5: Custom)
+# We start at Beginner by default.
+current_diff_index = 0
+
+
+# ---------------------------
+# Utility: Logging function
+# ---------------------------
+def log_event(msg):
+    global game_log
+    game_log.append(msg)
+    # Keep only the last 6 messages
+    if len(game_log) > 6:
+        game_log = game_log[-6:]
+
+
+# ---------------------------
+# Popup: Story at beginning of level / Epilogue
+# ---------------------------
+def get_story_for_level(level_number, current_diff_index):
+    # For difficulties below Insane, we have story passages for levels 1–5,
+    # and level 6 will be the epilogue.
+    if current_diff_index < 4:
+        stories = {
+            1: [
+                "Level 1: A New Beginning",
+                "You awaken in a mysterious labyrinth of colors.",
+                "The walls whisper secrets of ancient puzzles.",
+                "Press Z to begin your journey."
+            ],
+            2: [
+                "Level 2: The Awakening",
+                "The corridors twist unexpectedly, revealing hidden symbols.",
+                "Every step you take seems both dangerous and enlightening.",
+                "Press Z to continue."
+            ],
+            3: [
+                "Level 3: Shadows of the Past",
+                "The maze deepens as echoes of past adventurers guide you.",
+                "Mystery and danger entwine in every passage.",
+                "Press Z to continue."
+            ],
+            4: [
+                "Level 4: The Enigma",
+                "Reality warps as the dimensions shift around you.",
+                "You must trust your intuition to decipher these cryptic signs.",
+                "Press Z to continue."
+            ],
+            5: [
+                "Level 5: Crossroads",
+                "At the junction of fate and mystery, your resolve is tested.",
+                "The future is uncertain, but you press onward.",
+                "Press Z to continue."
+            ],
+            6: [
+                "EPILOGUE:",
+                "You have conquered the realm of shifting dimensions!",
+                "Legends will forever recount your mastery over the 4D maze.",
+                "Press Z to continue."
+            ]
+        }
+        # Return the story if defined; otherwise, use a default passage.
+        return stories.get(level_number, [
+            f"Level {level_number}: The Journey Continues",
+            "New challenges arise that push you to your limits.",
+            "Yet, you march forward undaunted.",
+            "Press Z to continue."
+        ])
+    else:
+        # For Insane difficulty, use an epic final message regardless of level.
+        return [
+            "EPILOGUE:",
+            "You have conquered the most brutal dimensions!",
+            "Legends will forever speak of your heroism.",
+            "Press Z to continue."
+        ]
+
+def show_story(screen, font, level_number, current_diff_index):
+    story_lines = get_story_for_level(level_number, current_diff_index)
+    overlay = pygame.Surface(screen.get_size())
+    overlay.fill((0, 0, 0))
+    screen.blit(overlay, (0, 0))
+    y = 100
+    for line in story_lines:
+        text_surface = font.render(line, True, (255,255,255))
+        screen.blit(text_surface, (50, y))
+        y += 40
+    pygame.display.flip()
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_z:
+                waiting = False
+            elif event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+# ---------------------------
+# Popup: Game Over / Restart Level
+# ---------------------------
+def show_gameover_popup(screen, font):
+    overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    screen.blit(overlay, (0, 0))
+    popup_rect = pygame.Rect(50, 50, 400, 200)
+    text_lines = [
+        "You DIED!",
+        "Now let's move to a new map! Press Y to continue."
+    ]
+    y = popup_rect.top + 20
+    for line in text_lines:
+        text_surface = font.render(line, True, (255, 0, 0))
+        screen.blit(text_surface, (popup_rect.left + 20, y))
+        y += 40
+    pygame.display.flip()
+    waiting = True
+    restart = False
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_y:
+                    restart = True
+                    waiting = False
+            elif event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+    return restart
+# ---------------------------
+# Function: Copy Save to Clipboard
+# ---------------------------
+def copy_save_to_clipboard(level_number, current_diff_index, player_pos):
+    save_text = f"Level: {level_number}\nDifficulty: {current_diff_index}\nPlayer Position: {player_pos}\nLog:\n" + "\n".join(
+        game_log)
+    pyperclip.copy(save_text)
+    log_event("Save copied to clipboard.")
+
+
+# ---------------------------
+# Difficulty Settings (No selection tab; default is used)
+# ---------------------------
+def get_settings_from_index(index):
+    if index == 0:  # Beginner
+        return {
+            "dims": (5, 5, 5, 5),
+            "vision_mode": "unlimited",
+            "rotate_counts_as_move": False,
+            "distributions": {
+                "static_wall": 0.3,
+                "moving_wall": 0,
+                "red": 0,
+                "purple": 0,
+                "green": 0,
+                "blue": 0.05,
+                "white": 0.65
+            }
+        }
+    elif index == 1:  # Easy
+        return {
+            "dims": (5, 5, 5, 5),
+            "vision_mode": 3,
+            "rotate_counts_as_move": False,
+            "distributions": {
+                "static_wall": 0.10,
+                "moving_wall": 0.05,
+                "red": 0.05,
+                "purple": 0.05,
+                "green": 0.05,
+                "blue": 0.10,
+                "white": 0.6
+            }
+        }
+    elif index == 2:  # Medium
+        return {
+            "dims": (7, 7, 7, 7),
+            "vision_mode": 5,
+            "rotate_counts_as_move": False,
+            "distributions": {
+                "static_wall": 0.15,
+                "moving_wall": 0.15,
+                "red": 0.20,
+                "purple": 0.10,
+                "green": 0.05,
+                "blue": 0.05,
+                "white": 0.30
+            }
+        }
+    elif index == 3:  # Hard
+        return {
+            "dims": (7, 7, 7, 7),
+            "vision_mode": 5,
+            "rotate_counts_as_move": True,
+            "distributions": {
+                "static_wall": 0.15,
+                "moving_wall": 0.1,
+                "red": 0.20,
+                "purple": 0.10,
+                "green": 0.10,
+                "blue": 0.05,
+                "white": 0.30
+            }
+        }
+    elif index == 4:  # Insane
+        return {
+            "dims": (10, 10, 10, 10),
+            "vision_mode": "unlimited",
+            "rotate_counts_as_move": True,
+            "distributions": {
+                "static_wall": 0.20,
+                "moving_wall": 0.15,
+                "red": 0.25,
+                "purple": 0.15,
+                "green": 0.15,
+                "blue": 0.05,
+                "white": 0.05
+            }
+        }
+    else:
+        return get_settings_from_index(2)
+
+
+# ---------------------------
+# Popup to Ask for Difficulty Increase (Win Popup)
+# ---------------------------
+def show_win_popup(screen, font, current_diff_index):
+    overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    screen.blit(overlay, (0, 0))
+    popup_rect = pygame.Rect(50, 50, 400, 200)
+
+    if current_diff_index < 4:
+        text_lines = [
+            "Congratulations! Level Complete!",
+            "Press Y to continue."
+        ]
+    else:
+        text_lines = [
+            "CONGRATULATIONS!",
+            "You completed the INSANE level!",
+            "You are a master!",
+            "Press any key to continue."
+        ]
+
+    y = popup_rect.top + 20
+    for line in text_lines:
+        text_surface = font.render(line, True, (255, 255, 255))
+        screen.blit(text_surface, (popup_rect.left + 20, y))
+        y += 40
+    pygame.display.flip()
+
+    waiting = True
+    new_diff_index = current_diff_index
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if current_diff_index < 4:
+                    if event.key == pygame.K_y:
+                        new_diff_index = current_diff_index + 1
+                    waiting = False
+                else:
+                    waiting = False
+            elif event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+    return new_diff_index
+
+
+# ---------------------------
+#       GAME CODE
+# ---------------------------
+SADDLE_BROWN = (139, 69, 19)
+DARK_GOLDENROD = (184, 134, 11)
+RED = (255, 0, 0)
+PURPLE = (128, 0, 128)
+GREEN = (0, 255, 0)
+BLUE = (0, 128, 255)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+
+font = None
+plane_index = 0
+rotate_counts_as_move = False
+
+dimension_pairs = [
+    (0, 1), (0, 2), (0, 3),
+    (1, 2), (1, 3),
+    (2, 3)
+]
+
+
+def get_current_plane():
+    return dimension_pairs[plane_index]
+
+
+def cycle_plane(forward=True):
+    global plane_index
+    if forward:
+        plane_index = (plane_index + 1) % len(dimension_pairs)
+    else:
+        plane_index = (plane_index - 1) % len(dimension_pairs)
+
+
+def get_locked_dims(plane):
+    return tuple(sorted(set([0, 1, 2, 3]) - set(plane)))
+
+
+def generate_map_4d(dims, dist):
+    dx, dy, dz, dw = dims
+    color_grid = []
+    staticWalls = []
+    movingWalls = []
+    purpleCells = []
+    greenCells = []
+    blueCells = []
+
+    for x in range(dx):
+        col_y = []
+        for y in range(dy):
+            col_z = []
+            for z in range(dz):
+                col_w = []
+                for w in range(dw):
+                    r = random.random()
+                    limit_static = dist["static_wall"]
+                    limit_moving = limit_static + dist["moving_wall"]
+                    limit_red = limit_moving + dist["red"]
+                    limit_purple = limit_red + dist["purple"]
+                    limit_green = limit_purple + dist["green"]
+                    limit_blue = limit_green + dist["blue"]
+
+                    if r < limit_static:
+                        c = SADDLE_BROWN
+                        staticWalls.append((x, y, z, w))
+                    elif r < limit_moving:
+                        c = DARK_GOLDENROD
+                        movingWalls.append((x, y, z, w))
+                    elif r < limit_red:
+                        c = RED
+                    elif r < limit_purple:
+                        c = PURPLE
+                        purpleCells.append((x, y, z, w))
+                    elif r < limit_green:
+                        c = GREEN
+                        greenCells.append((x, y, z, w))
+                    elif r < limit_blue:
+                        c = BLUE
+                        blueCells.append((x, y, z, w))
+                    else:
+                        c = WHITE
+                    col_w.append(c)
+                col_z.append(col_w)
+            col_y.append(col_z)
+        color_grid.append(col_y)
+
+    return color_grid, staticWalls, movingWalls, purpleCells, greenCells, blueCells
+
+
+def make_portal_pairs(blue_cells):
+    pc = {}
+    random.shuffle(blue_cells)
+    for i in range(0, len(blue_cells) - 1, 2):
+        c1 = blue_cells[i]
+        c2 = blue_cells[i + 1]
+        pc[c1] = c2
+        pc[c2] = c1
+    return pc
+
+
+def link_toggles(purple_cells, green_cells):
+    toggles = {}
+    toggled_state = {}
+    for p in purple_cells:
+        toggled_state[p] = True
+
+    unclaimed = purple_cells[:]
+    random.shuffle(unclaimed)
+    random.shuffle(green_cells)
+
+    for g in green_cells:
+        how_many = random.randint(1, 2)
+        chosen = []
+        for _ in range(how_many):
+            if not unclaimed:
+                break
+            c = random.choice(unclaimed)
+            chosen.append(c)
+            unclaimed.remove(c)
+        if chosen:
+            toggles[g] = chosen
+
+    return toggles, toggled_state
+
+
+def force_start_goal_safe(color_grid, dims):
+    dx, dy, dz, dw = dims
+    color_grid[0][0][0][0] = WHITE
+    color_grid[dx - 1][dy - 1][dz - 1][dw - 1] = WHITE
+
+
+def create_mark_grid(dims):
+    dx, dy, dz, dw = dims
+    return [
+        [
+            [
+                [False for _ in range(dw)]
+                for _ in range(dz)
+            ]
+            for _ in range(dy)
+        ]
+        for _ in range(dx)
+    ]
+
+
+def in_bounds4(x, y, z, w, dims):
+    dx, dy, dz, dw = dims
+    return (0 <= x < dx and 0 <= y < dy and 0 <= z < dz and 0 <= w < dw)
+
+
+# ---------------------------
+# NEW FUNCTION #1: is_solvable
+# ---------------------------
+def is_solvable(color_grid, portal_connections, dims):
+    dx, dy, dz, dw = dims
+    start = (0, 0, 0, 0)
+    goal = (dx - 1, dy - 1, dz - 1, dw - 1)
+
+    if color_grid[0][0][0][0] in (SADDLE_BROWN, DARK_GOLDENROD, RED, PURPLE):
+        return False
+    if color_grid[goal[0]][goal[1]][goal[2]][goal[3]] in (SADDLE_BROWN, DARK_GOLDENROD, RED, PURPLE):
+        return False
+
+    visited = set()
+    queue = [start]
+    visited.add(start)
+
+    while queue:
+        x, y, z, w = queue.pop(0)
+        if (x, y, z, w) == goal:
+            return True
+
+        neighbors = []
+        for dindex in range(4):
+            for step in [1, -1]:
+                nx, ny, nz, nw = x, y, z, w
+                if dindex == 0:
+                    nx = x + step
+                elif dindex == 1:
+                    ny = y + step
+                elif dindex == 2:
+                    nz = z + step
+                else:
+                    nw = w + step
+
+                if in_bounds4(nx, ny, nz, nw, dims):
+                    block = color_grid[nx][ny][nz][nw]
+                    if block not in (SADDLE_BROWN, DARK_GOLDENROD, RED, PURPLE):
+                        neighbors.append((nx, ny, nz, nw))
+
+        block_here = color_grid[x][y][z][w]
+        if block_here == BLUE and (x, y, z, w) in portal_connections:
+            px, py, pz, pw = portal_connections[(x, y, z, w)]
+            if color_grid[px][py][pz][pw] not in (SADDLE_BROWN, DARK_GOLDENROD, RED, PURPLE):
+                neighbors.append((px, py, pz, pw))
+
+        for nb in neighbors:
+            if nb not in visited:
+                visited.add(nb)
+                queue.append(nb)
+
+    return False
+
+
+# ---------------------------
+# NEW FUNCTION #2: generate_solvable_map_4d
+# ---------------------------
+def generate_solvable_map_4d(dims, dist):
+    while True:
+        color_grid, staticWalls, movingWalls, purpleCells, greenCells, blueCells = generate_map_4d(dims, dist)
+        force_start_goal_safe(color_grid, dims)
+        portal_connections = make_portal_pairs(blueCells)
+        if is_solvable(color_grid, portal_connections, dims):
+            return color_grid, staticWalls, movingWalls, purpleCells, greenCells, blueCells, portal_connections
+
+
+# --------------------------------------------------
+# The rest of the code is similar to previous versions, with the removal of locked-plane movement.
+# --------------------------------------------------
+
+def maybe_toggle(player_pos, color_grid, toggles, toggled_state):
+    (x, y, z, w) = player_pos
+    block = color_grid[x][y][z][w]
+    if block == GREEN and (x, y, z, w) in toggles:
+        for pc in toggles[(x, y, z, w)]:
+            toggled_state[pc] = not toggled_state[pc]
+            state_str = "deadly" if toggled_state[pc] else "safe"
+            log_event(f"Toggle: Block at {pc} changed to {state_str}")
+
+
+def maybe_teleport(player_pos, color_grid, portal_connections):
+    (x, y, z, w) = player_pos
+    block = color_grid[x][y][z][w]
+    if block == BLUE and (x, y, z, w) in portal_connections:
+        dest = portal_connections[(x, y, z, w)]
+        log_event(f"Portal used: from {(x, y, z, w)} to {dest}")
+        return dest
+    return player_pos
+
+
+def shift_moving_walls(color_grid, moving_walls, dims):
+    dx, dy, dz, dw = dims
+    new_grid = [
+        [
+            [
+                [color_grid[x][y][z][w] for w in range(dw)]
+                for z in range(dz)
+            ]
+            for y in range(dy)
+        ]
+        for x in range(dx)
+    ]
+
+    dim = random.choice([0, 1, 2, 3])
+    new_positions = []
+
+    for (mx, my, mz, mw) in moving_walls:
+        if dim == 0:
+            nx = (mx + 1) % dx;
+            ny = my;
+            nz = mz;
+            nw = mw
+        elif dim == 1:
+            nx = mx;
+            ny = (my + 1) % dy;
+            nz = mz;
+            nw = mw
+        elif dim == 2:
+            nx = mx;
+            ny = my;
+            nz = (mz + 1) % dz;
+            nw = mw
+        else:
+            nx = mx;
+            ny = my;
+            nz = mz;
+            nw = (mw + 1) % dw
+
+        if new_grid[nx][ny][nz][nw] == WHITE:
+            new_grid[mx][my][mz][mw] = WHITE
+            new_grid[nx][ny][nz][nw] = DARK_GOLDENROD
+            new_positions.append((nx, ny, nz, nw))
+        else:
+            new_positions.append((mx, my, mz, mw))
+
+    for x in range(dx):
+        for y in range(dy):
+            for z in range(dz):
+                for w in range(dw):
+                    color_grid[x][y][z][w] = new_grid[x][y][z][w]
+
+    moving_walls[:] = new_positions
+
+
+def get_visible_cells(player_pos, dims, vision_mode):
+    (dx, dy, dz, dw) = dims
+    d1, d2 = get_current_plane()
+    center_r = player_pos[d1]
+    center_c = player_pos[d2]
+
+    if vision_mode == "unlimited":
+        max_r = [dx, dy, dz, dw][d1]
+        max_c = [dx, dy, dz, dw][d2]
+        return [(r, c) for r in range(max_r) for c in range(max_c)]
+
+    half = (vision_mode - 1) // 2
+    visible = []
+    max_r = [dx, dy, dz, dw][d1]
+    max_c = [dx, dy, dz, dw][d2]
+
+    for row in range(center_r - half, center_r + half + 1):
+        for col in range(center_c - half, center_c + half + 1):
+            if 0 <= row < max_r and 0 <= col < max_c:
+                visible.append((row, col))
+    return visible
+
+
+def draw_grid(screen, player_pos, color_grid, mark_grid,
+              toggled_state, portal_connections, game_over, game_won,
+              dims, vision_mode, cell_size, margin):
+    screen.fill(BLACK)
+    d1, d2 = get_current_plane()
+    locked = get_locked_dims((d1, d2))
+    lv0 = player_pos[locked[0]]
+    lv1 = player_pos[locked[1]]
+
+    visible_cells = get_visible_cells(player_pos, dims, vision_mode)
+
+    dx, dy, dz, dw = dims
+    plane_size_r = [dx, dy, dz, dw][d1]
+
+    for (row, col) in visible_cells:
+        coord = [0, 0, 0, 0]
+        coord[d1] = row
+        coord[d2] = col
+        coord[locked[0]] = lv0
+        coord[locked[1]] = lv1
+        x, y, z, w = coord
+
+        block = color_grid[x][y][z][w]
+        draw_color = block
+        if block == PURPLE:
+            if toggled_state.get((x, y, z, w), True):
+                draw_color = PURPLE
+            else:
+                draw_color = (200, 100, 200)
+        if mark_grid[x][y][z][w]:
+            draw_color = (draw_color[0] // 2, draw_color[1] // 2, draw_color[2] // 2)
+
+        rx = col * (cell_size) + (col + 1) * margin
+        ry = row * (cell_size) + (row + 1) * margin
+        pygame.draw.rect(screen, draw_color, (rx, ry, cell_size, cell_size))
+
+    pr = player_pos[d1]
+    pc = player_pos[d2]
+    if (pr, pc) in visible_cells:
+        px = pc * (cell_size) + (pc + 1) * margin
+        py = pr * (cell_size) + (pr + 1) * margin
+        pygame.draw.rect(screen, (255, 255, 0), (px, py, cell_size, cell_size), 3)
+
+    plane_text = f"Plane: {d1},{d2}"
+    locked_text = f"Locked: {locked}"
+    upos = (player_pos[0] + 1, player_pos[1] + 1, player_pos[2] + 1, player_pos[3] + 1)
+    pos_text = f"Pos: {upos}"
+    status_text = ""
+    if game_won:
+        status_text = "YOU WIN!"
+    elif game_over:
+        status_text = "YOU DIED!"
+    instructions = "Arrows=Move, R/F=Rotate, C=Copy Save"
+
+    t1 = font.render(plane_text, True, (255, 255, 255))
+    t2 = font.render(locked_text, True, (255, 255, 255))
+    t3 = font.render(pos_text, True, (255, 255, 255))
+    t4 = font.render(instructions, True, (255, 255, 255))
+    t5 = font.render(status_text, True, (255, 0, 0))
+
+    screen.blit(t1, (10, (plane_size_r * (cell_size + margin)) + 10))
+    screen.blit(t2, (10, (plane_size_r * (cell_size + margin)) + 30))
+    screen.blit(t3, (200, (plane_size_r * (cell_size + margin)) + 10))
+    screen.blit(t4, (200, (plane_size_r * (cell_size + margin)) + 30))
+    if status_text:
+        screen.blit(t5, (10, (plane_size_r * (cell_size + margin)) - 10))
+
+    # Draw game log at the bottom
+    log_y = (plane_size_r * (cell_size + margin)) + 50
+    for msg in game_log:
+        log_surface = font.render(msg, True, (200, 200, 200))
+        screen.blit(log_surface, (10, log_y))
+        log_y += 20
+
+
+def attempt_move(old_pos, dx_, dy_, dz_, dw_,
+                 color_grid, toggled_state, portal_connections, dims):
+    (x, y, z, w) = old_pos
+    nx, ny, nz, nw = x + dx_, y + dy_, z + dz_, w + dw_
+    if not in_bounds4(nx, ny, nz, nw, dims):
+        return old_pos
+
+    block = color_grid[nx][ny][nz][nw]
+    if block in (SADDLE_BROWN, DARK_GOLDENROD):
+        return old_pos
+    if block == RED:
+        log_event(f"Death: Moved into RED at {(nx, ny, nz, nw)}")
+        return (nx, ny, nz, nw)
+    if block == PURPLE and toggled_state.get((nx, ny, nz, nw), True):
+        log_event(f"Death: Toggled PURPLE at {(nx, ny, nz, nw)}")
+        return (nx, ny, nz, nw)
+
+    return (nx, ny, nz, nw)
+
+
+def screen_to_cell(mx, my, cell_size, margin, dims):
+    sx = mx - margin
+    sy = my - margin
+    if sx < 0 or sy < 0:
+        return None
+
+    w_cell = cell_size + margin
+    col = sx // w_cell
+    row = sy // w_cell
+
+    max_dim = max(dims)
+    if col < 0 or col >= max_dim or row < 0 or row >= max_dim:
+        return None
+
+    return (row, col)
+
+
+# ---------------------------
+# Main Function
+# ---------------------------
+def main():
+    global current_diff_index, rotate_counts_as_move, font, fullscreen, level_number
+    # Use default (Medium) difficulty
+    settings = get_settings_from_index(current_diff_index)
+    dims = settings["dims"]
+    rotate_counts_as_move = settings["rotate_counts_as_move"]
+    vision_mode = settings["vision_mode"]
+    dist = settings["distributions"]
+
+    # Set up display in fullscreen using current resolution.
+    pygame.init()
+    info = pygame.display.Info()
+    window_width = info.current_w
+    window_height = info.current_h
+    screen = pygame.display.set_mode((window_width, window_height), pygame.FULLSCREEN)
+    pygame.display.set_caption("4D Puzzle Final Release")
+    font = pygame.font.SysFont(None, 24)
+
+    # Show story passage at level start
+    show_story(screen, font, level_number, current_diff_index)
+
+    (color_grid, staticWalls, movingWalls,
+     purpleCells, greenCells, blueCells,
+     portal_connections) = generate_solvable_map_4d(dims, dist)
+    toggles, toggled_state = link_toggles(purpleCells, greenCells)
+    mark_grid = create_mark_grid(dims)
+
+    player_pos = (0, 0, 0, 0)
+    goal_pos = (dims[0] - 1, dims[1] - 1, dims[2] - 1, dims[3] - 1)
+    game_over = False
+    game_won = False
+
+    clock = pygame.time.Clock()
+    running = True
+    dragging = False
+    drag_cell = None
+
+    while running:
+        clock.tick(30)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.KEYDOWN:
+                # Copy save to clipboard (C)
+                if event.key == pygame.K_c:
+                    copy_save_to_clipboard(level_number, current_diff_index, player_pos)
+                # Movement: Arrow keys to move in current plane
+                elif event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
+                    d1, d2 = get_current_plane()
+                    move_delta = [0, 0, 0, 0]
+                    if event.key == pygame.K_LEFT:
+                        move_delta[d2] = -1
+                    elif event.key == pygame.K_RIGHT:
+                        move_delta[d2] = 1
+                    elif event.key == pygame.K_UP:
+                        move_delta[d1] = -1
+                    elif event.key == pygame.K_DOWN:
+                        move_delta[d1] = 1
+
+                    old_pos = player_pos
+                    new_pos = attempt_move(old_pos, *move_delta,
+                                           color_grid=color_grid,
+                                           toggled_state=toggled_state,
+                                           portal_connections=portal_connections,
+                                           dims=dims)
+                    if new_pos != old_pos:
+                        (nx, ny, nz, nw) = new_pos
+                        block = color_grid[nx][ny][nz][nw]
+                        lethal = False
+                        if block == RED:
+                            lethal = True
+                        elif block == PURPLE and toggled_state.get((nx, ny, nz, nw), True):
+                            lethal = True
+                        if lethal:
+                            game_over = True
+                        else:
+                            player_pos = new_pos
+                            maybe_toggle(player_pos, color_grid, toggles, toggled_state)
+                            player_pos = maybe_teleport(player_pos, color_grid, portal_connections)
+                            shift_moving_walls(color_grid, movingWalls, dims)
+                # Rotation keys remain the same.
+                elif event.key == pygame.K_r:
+                    cycle_plane(True)
+                    if rotate_counts_as_move and not (game_over or game_won):
+                        shift_moving_walls(color_grid, movingWalls, dims)
+                elif event.key == pygame.K_f:
+                    cycle_plane(False)
+                    if rotate_counts_as_move and not (game_over or game_won):
+                        shift_moving_walls(color_grid, movingWalls, dims)
+                # Ignore any locked-plane movement keys (Q, W, E, S) – they are removed.
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    dragging = True
+                    drag_cell = screen_to_cell(event.pos[0], event.pos[1], 60, 2, dims)
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    # Only process right-click for marking; ignore left-click for movement.
+                    if event.button == 3:
+                        cell = screen_to_cell(event.pos[0], event.pos[1], 60, 2, dims)
+                        if cell is not None:
+                            vc = get_visible_cells(player_pos, dims, vision_mode)
+                            if cell in vc:
+                                d1, d2 = get_current_plane()
+                                coord = list(player_pos)
+                                coord[d1] = cell[0]
+                                coord[d2] = cell[1]
+                                x, y, z, w = coord
+                                if in_bounds4(x, y, z, w, dims):
+                                    mark_grid[x][y][z][w] = not mark_grid[x][y][z][w]
+            elif event.type == pygame.MOUSEMOTION:
+                if dragging:
+                    drag_cell = screen_to_cell(event.pos[0], event.pos[1], 60, 2, dims)
+
+        if (not game_over) and (not game_won) and player_pos == goal_pos:
+            game_won = True
+
+        draw_grid(screen, player_pos, color_grid, mark_grid,
+                  toggled_state, portal_connections, game_over, game_won,
+                  dims, vision_mode, 60, 2)
+        pygame.display.flip()
+
+        # If level is won, show win popup and reinitialize level
+        if game_won:
+            new_index = show_win_popup(screen, font, current_diff_index)
+            current_diff_index = new_index
+            settings = get_settings_from_index(current_diff_index)
+            dims = settings["dims"]
+            rotate_counts_as_move = settings["rotate_counts_as_move"]
+            vision_mode = settings["vision_mode"]
+            dist = settings["distributions"]
+
+            window_width = info.current_w
+            window_height = info.current_h
+            screen = pygame.display.set_mode((window_width, window_height), pygame.FULLSCREEN)
+            pygame.display.set_caption("4D Puzzle Final Release")
+
+            level_number += 1
+            show_story(screen, font, level_number, current_diff_index)
+
+            (color_grid, staticWalls, movingWalls,
+             purpleCells, greenCells, blueCells,
+             portal_connections) = generate_solvable_map_4d(dims, dist)
+            toggles, toggled_state = link_toggles(purpleCells, greenCells)
+            mark_grid = create_mark_grid(dims)
+            player_pos = (0, 0, 0, 0)
+            goal_pos = (dims[0] - 1, dims[1] - 1, dims[2] - 1, dims[3] - 1)
+            game_over = False
+            game_won = False
+
+        # If game over, show game over popup and allow restart
+        if game_over:
+            restart = show_gameover_popup(screen, font)
+            if restart:
+                (color_grid, staticWalls, movingWalls,
+                 purpleCells, greenCells, blueCells,
+                 portal_connections) = generate_solvable_map_4d(dims, dist)
+                toggles, toggled_state = link_toggles(purpleCells, greenCells)
+                mark_grid = create_mark_grid(dims)
+                player_pos = (0, 0, 0, 0)
+                goal_pos = (dims[0] - 1, dims[1] - 1, dims[2] - 1, dims[3] - 1)
+                game_over = False
+            else:
+                running = False
+
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    main()
